@@ -56,6 +56,7 @@ struct EGLGlue {
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC EGLImageTargetTexture2DOES;
   PFNEGLCREATESYNCKHRPROC CreateSyncKHR;
   PFNEGLCLIENTWAITSYNCKHRPROC ClientWaitSyncKHR;
+  PFNEGLGETPLATFORMDISPLAYEXTPROC GetPlatformDisplayEXT;
   bool egl_sync_supported;
 };
 
@@ -268,7 +269,28 @@ class EGLDRMGlue::Impl : public DRMModesetter::Client {
   }
 
  private:
+  bool has_ext(const char *extension_list, const char *ext) {
+      const char *ptr = extension_list;
+      int len = strlen(ext);
+
+      if (ptr == NULL || *ptr == '\0')
+          return false;
+
+      while (true) {
+          ptr = strstr(ptr, ext);
+          if (!ptr)
+              return false;
+
+          if (ptr[len] == ' ' || ptr[len] == '\0')
+              return true;
+
+          ptr += len;
+      }
+  }
+
   bool InitializeEGL() {
+    const char *egl_exts_client;
+
     egl_.CreateImageKHR =
         (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
     egl_.DestroyImageKHR =
@@ -294,7 +316,17 @@ class EGLDRMGlue::Impl : public DRMModesetter::Client {
       egl_.egl_sync_supported = false;
     }
 
-    egl_.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    egl_exts_client = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+    if (has_ext(egl_exts_client, "EGL_EXT_platform_base")) {
+        egl_.GetPlatformDisplayEXT = (PFNEGLGETPLATFORMDISPLAYEXTPROC)
+            eglGetProcAddress("eglGetPlatformDisplayEXT");
+    }
+
+    if (egl_.GetPlatformDisplayEXT)
+        egl_.display = egl_.GetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR,
+                gbm_, NULL);
+    else
+        egl_.display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
 
     EGLint major, minor = 0;
     if (!eglInitialize(egl_.display, &major, &minor)) {
